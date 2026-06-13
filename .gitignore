@@ -1,0 +1,12 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+
+# ローカルのバックアップ書き出し
+tone-vocab-*.json
+
+# 依存（将来ビルドを入れた場合）
+node_modules/
+dist/

@@ -1,12 +1,12 @@
 {
-  "name": "音色のことば",
-  "short_name": "音色のことば",
-  "description": "音を表す言葉を貯め、意味の揺れを見えるようにするツール",
+  "name": "聴景 — 音の観察ノート",
+  "short_name": "聴景",
+  "description": "聴くことで立ち上がる景色を記録するノート。音を分析するのではなく、聴いたあと何が残ったかを書きとめる。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#161619",
-  "theme_color": "#1b1b1f",
+  "background_color": "#F7F4ED",
+  "theme_color": "#F7F4ED",
   "lang": "ja",
   "icons": [
     {

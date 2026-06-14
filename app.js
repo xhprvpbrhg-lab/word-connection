@@ -5,13 +5,14 @@ import * as repo from './db.js';
 
 const html = htm.bind(h);
 
+// 良し悪し（残り方）。世界観に合わせ観察的な言葉で。内部キーは従来どおり。
 const VALENCES = [
-  { key: 'positive', label: 'ポジ ＋', cls: 'v-pos' },
-  { key: 'neutral', label: '中立', cls: 'v-neu' },
-  { key: 'negative', label: 'ネガ −', cls: 'v-neg' },
+  { key: 'positive', label: 'ここちよい', cls: 'v-pos' },
+  { key: 'neutral', label: 'ふつう', cls: 'v-neu' },
+  { key: 'negative', label: 'ひっかかる', cls: 'v-neg' },
 ];
-const vMark = { positive: '＋', neutral: '○', negative: '−' };
 const vCls = { positive: 'v-pos', neutral: 'v-neu', negative: 'v-neg' };
+const vWord = { positive: 'ここちよい', neutral: 'ふつう', negative: 'ひっかかる' };
 
 const SOURCE_KINDS = [
   ['youtube', 'YouTube'], ['piano', 'ピアノ'], ['recording', '録音'], ['venue', '会場'], ['other', 'その他'],
@@ -29,6 +30,9 @@ const ORIGINS = [
 ];
 const originLabel = Object.fromEntries(ORIGINS);
 
+const TERM_PLACEHOLDERS = ['白い霧', '張りつめた', '湿度', '呼吸', '冷たい光', '古木', '遠い灯'];
+const pickPlaceholder = () => TERM_PLACEHOLDERS[Math.floor(Math.random() * TERM_PLACEHOLDERS.length)];
+
 // --- ルーティング（ハッシュ） ----------------------------------------------
 function useHashRoute() {
   const [hash, setHash] = useState(location.hash || '#/');
@@ -44,14 +48,17 @@ const go = (h) => { location.hash = h; };
 // --- アプリ ------------------------------------------------------------------
 function App() {
   const hash = useHashRoute();
-  const [tick, setTick] = useState(0); // 保存後の再描画トリガ
+  const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
 
   const m = hash.match(/^#\/term\/(.+)$/);
   return html`
     <div class="app">
       <header class="topbar">
-        <h1 onClick=${() => go('#/')}>音色のことば</h1>
+        <div class="brand" onClick=${() => go('#/')}>
+          <span class="brand-name">聴景</span>
+          <span class="brand-sub">音の観察ノート</span>
+        </div>
         <${BackupMenu} onChange=${refresh} />
       </header>
       ${m
@@ -60,38 +67,41 @@ function App() {
     </div>`;
 }
 
-// --- ホーム（クイック入力 + 最近 + 言葉一覧） --------------------------------
 function Home({ tick, onSaved }) {
   return html`
-    <${QuickInput} onSaved=${onSaved} />
-    <${RecentList} tick=${tick} />
-    <${TermList} tick=${tick} />`;
+    <${NoteInput} onSaved=${onSaved} />
+    <${ObservationLog} tick=${tick} />
+    <${TermCloud} tick=${tick} />`;
 }
 
-// --- クイック入力 ------------------------------------------------------------
-function QuickInput({ onSaved }) {
+// --- 入力（ノートに書き込む感覚） --------------------------------------------
+function NoteInput({ onSaved }) {
   const [term, setTerm] = useState('');
   const [valence, setValence] = useState('positive');
   const [suggest, setSuggest] = useState([]);
-  const [fileUnder, setFileUnder] = useState(null); // 人が確定した「まとめ先」既存Term
+  const [fileUnder, setFileUnder] = useState(null);
   const [focus, setFocus] = useState('performance');
   const [person, setPerson] = useState('');
   const [personKind, setPersonKind] = useState('pianist');
   const [source, setSource] = useState('');
   const [sourceKind, setSourceKind] = useState('youtube');
   const [sourceRef, setSourceRef] = useState('');
-  const [showContrast, setShowContrast] = useState(false);
+  const [via, setVia] = useState('direct');
   const [contrast, setContrast] = useState('');
   const [note, setNote] = useState('');
-  const [via, setVia] = useState('direct');
-  const [showLocation, setShowLocation] = useState(false);
   const [timestamp, setTimestamp] = useState('');
   const [locationNote, setLocationNote] = useState('');
+  const [showSource, setShowSource] = useState(false);
+  const [showPerson, setShowPerson] = useState(false);
+  const [showContrast, setShowContrast] = useState(false);
+  const [showLocation, setShowLocation] = useState(false);
   const [persons, setPersons] = useState([]);
   const [sources, setSources] = useState([]);
   const [recentSrc, setRecentSrc] = useState([]);
   const [recentPpl, setRecentPpl] = useState([]);
   const [saved, setSaved] = useState('');
+  const [ripple, setRipple] = useState(false);
+  const [ph] = useState(pickPlaceholder);
 
   const reloadLists = () => {
     repo.listPersons().then(setPersons);
@@ -107,26 +117,22 @@ function QuickInput({ onSaved }) {
     if (!t) { setSuggest([]); return; }
     repo.termSuggestions(t).then((s) => {
       if (!live) return;
-      setSuggest(s.filter((x) => x.label !== t)); // 完全一致は自動同一視されるので除く
+      setSuggest(s.filter((x) => x.label !== t));
     });
     return () => { live = false; };
   }, [term]);
 
-  // Focus = 瞬間 のときは場所・Timestamp欄を自動で開く
   useEffect(() => { if (focus === 'moment') setShowLocation(true); }, [focus]);
 
   const onTerm = (v) => { setTerm(v); setFileUnder(null); };
-
-  // 既存Sourceを選んだら kind / ref を自動で紐づける
   const onSource = (v) => {
     setSource(v);
     const found = sources.find((s) => s.label === v);
     if (found) { setSourceKind(found.kind); setSourceRef(found.ref || ''); }
   };
-  const pickSource = (s) => { setSource(s.label); setSourceKind(s.kind); setSourceRef(s.ref || ''); };
-  const pickPerson = (p) => { setPerson(p.name); setPersonKind(p.kind); };
+  const pickSource = (s) => { setSource(s.label); setSourceKind(s.kind); setSourceRef(s.ref || ''); setShowSource(true); };
+  const pickPerson = (p) => { setPerson(p.name); setPersonKind(p.kind); setShowPerson(true); };
 
-  // keepContext=true: source/person/origin/focus/timestamp/locationNote を維持し term/note/contrast だけ消す
   const doSave = async (keepContext) => {
     const label = term.trim();
     if (!label) return;
@@ -144,261 +150,260 @@ function QuickInput({ onSaved }) {
       timestamp, locationNote,
     });
     reloadLists();
-    // term レベルのみクリア
+    setRipple(true); setTimeout(() => setRipple(false), 500);
     setTerm(''); setContrast(''); setNote(''); setShowContrast(false);
     setSuggest([]); setFileUnder(null);
     if (!keepContext) {
-      // 通常保存: 瞬間的な文脈はゆるめる（source/person/origin は利便のため維持）
       setFocus('performance'); setTimestamp(''); setLocationNote(''); setShowLocation(false);
     }
     setSaved(keepContext ? 'next' : 'done');
-    setTimeout(() => setSaved(''), 1400);
+    setTimeout(() => setSaved(''), 1500);
     onSaved && onSaved();
   };
 
   const locOpen = showLocation || focus === 'moment';
+  const ctx = [source.trim(), person.trim()].filter(Boolean).join(' ・ ');
 
   return html`
-    <section class="card qi">
-      <div class="qi-head"><span class="bolt">⚡</span> クイック入力</div>
-
-      <input class="term-in" placeholder="言葉を入力… 例: 明るい" value=${term}
+    <section class=${'note' + (ripple ? ' rippling' : '')}>
+      <div class="field-label">今日残った景色</div>
+      <input class="term-write" placeholder=${ph} value=${term}
         onInput=${(e) => onTerm(e.target.value)} />
 
       ${fileUnder
         ? html`
           <div class="merge-hint">
-            → <b>${fileUnder.label}</b> にまとめます
+            <span>→ <b>${fileUnder.label}</b> にまとめます</span>
             <button class="undo" onClick=${() => setFileUnder(null)}>解除</button>
           </div>`
         : suggest.length > 0 && html`
           <div class="suggests">
-            <span class="sg-label">まとめる候補:</span>
+            <span class="sg-label">まとめる</span>
             ${suggest.map((s) => html`
-              <button class="chip ghost" onClick=${() => setFileUnder(s)}>${s.label} にまとめる</button>`)}
+              <button class="chip" onClick=${() => setFileUnder(s)}>${s.label}</button>`)}
           </div>`}
 
       <div class="valence">
         ${VALENCES.map((v) => html`
-          <button class=${'vbtn ' + v.cls + (valence === v.key ? ' on' : '')}
-            onClick=${() => setValence(v.key)}>${v.label}</button>`)}
+          <button class=${'vchip ' + v.cls + (valence === v.key ? ' on' : '')}
+            onClick=${() => setValence(v.key)}>
+            <span class="vdot"></span>${v.label}
+          </button>`)}
       </div>
 
-      <div class="sub">観察対象</div>
+      <div class="field-label soft">何を聴いていたか</div>
       <div class="focuses">
         ${FOCUSES.map(([k, l]) => html`
-          <button class=${'fbtn' + (focus === k ? ' on' : '')} onClick=${() => setFocus(k)}>${l}</button>`)}
-      </div>
-
-      <div class="opt-row">
-        <div class="opt">
-          <label>誰が</label>
-          <input list="persons" placeholder="任意" value=${person} onInput=${(e) => setPerson(e.target.value)} />
-          <select value=${personKind} onChange=${(e) => setPersonKind(e.target.value)}>
-            ${PERSON_KINDS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
-          </select>
-        </div>
-        ${recentPpl.length > 0 && html`
-          <div class="recent-chips">
-            <span class="rc-label">最近:</span>
-            ${recentPpl.map((p) => html`
-              <button class="chip ghost" onClick=${() => pickPerson(p)}>${p.name}</button>`)}
-          </div>`}
-
-        <div class="opt">
-          <label>何について</label>
-          <input list="sources" placeholder="任意" value=${source} onInput=${(e) => onSource(e.target.value)} />
-          <select value=${sourceKind} onChange=${(e) => setSourceKind(e.target.value)}>
-            ${SOURCE_KINDS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
-          </select>
-        </div>
-        ${recentSrc.length > 0 && html`
-          <div class="recent-chips">
-            <span class="rc-label">最近:</span>
-            ${recentSrc.map((s) => html`
-              <button class="chip ghost" onClick=${() => pickSource(s)}>${s.label}</button>`)}
-          </div>`}
-        ${source.trim() && html`
-          <input class="ref" placeholder="URL / 製番など（任意）" value=${sourceRef}
-            onInput=${(e) => setSourceRef(e.target.value)} />`}
+          <button class=${'chip focus' + (focus === k ? ' on' : '')} onClick=${() => setFocus(k)}>${l}</button>`)}
       </div>
 
       ${focus === 'moment'
-        ? html`<div class="sub loc-cue">瞬間：場所・Timestampを指定</div>`
-        : html`<button class="disclose" onClick=${() => setShowLocation(!showLocation)}>
-            ◎ 場所・Timestampを指定（任意）${showLocation ? '▲' : '▼'}</button>`}
+        ? html`<div class="field-label soft loc-cue">どこで残ったか</div>`
+        : html`<button class="fold" onClick=${() => setShowLocation(!showLocation)}>
+            どこで残ったか${showLocation ? '　−' : '　＋'}</button>`}
       ${locOpen && html`
-        <div class="loc">
-          <input class="ts" placeholder="Timestamp 例 2:14" value=${timestamp}
+        <div class="loc reveal">
+          <input class="line-in ts" placeholder="2:14 など" value=${timestamp}
             onInput=${(e) => setTimestamp(e.target.value)} />
-          <input class="locnote" placeholder="場所メモ 例 ppの入り" value=${locationNote}
+          <input class="line-in" placeholder="ppの入り / 再現部 など" value=${locationNote}
             onInput=${(e) => setLocationNote(e.target.value)} />
         </div>`}
 
-      <button class="disclose" onClick=${() => setShowContrast(!showContrast)}>
-        ⇄ 対比（任意）— 強いて言えば反対は？ ${showContrast ? '▲' : '▼'}
-      </button>
-      ${showContrast && html`
-        <input class="ref" placeholder="例: こもった / キンキン" value=${contrast}
-          onInput=${(e) => setContrast(e.target.value)} />`}
+      <button class="fold" onClick=${() => setShowSource(!showSource)}>
+        何を聴いたか${source.trim() ? `　— ${source.trim()}` : ''}${showSource ? '　−' : '　＋'}</button>
+      ${showSource && html`
+        <div class="reveal">
+          <input class="line-in" list="sources" placeholder="動画 / ピアノ / 録音 …"
+            value=${source} onInput=${(e) => onSource(e.target.value)} />
+          <div class="mini-row">
+            <select value=${sourceKind} onChange=${(e) => setSourceKind(e.target.value)}>
+              ${SOURCE_KINDS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
+            </select>
+            <select value=${via} onChange=${(e) => setVia(e.target.value)}>
+              ${ORIGINS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
+            </select>
+          </div>
+          ${source.trim() && html`
+            <input class="line-in" placeholder="URL / 製番（任意）" value=${sourceRef}
+              onInput=${(e) => setSourceRef(e.target.value)} />`}
+          ${recentSrc.length > 0 && html`
+            <div class="suggests">
+              <span class="sg-label">最近</span>
+              ${recentSrc.map((s) => html`<button class="chip" onClick=${() => pickSource(s)}>${s.label}</button>`)}
+            </div>`}
+        </div>`}
 
-      <textarea class="note" placeholder="メモ・引用（任意）" value=${note}
+      <button class="fold" onClick=${() => setShowPerson(!showPerson)}>
+        誰の視点か${person.trim() ? `　— ${person.trim()}` : ''}${showPerson ? '　−' : '　＋'}</button>
+      ${showPerson && html`
+        <div class="reveal">
+          <input class="line-in" list="persons" placeholder="自分 / ピアニスト名 / コメント主 …"
+            value=${person} onInput=${(e) => setPerson(e.target.value)} />
+          <div class="mini-row">
+            <select value=${personKind} onChange=${(e) => setPersonKind(e.target.value)}>
+              ${PERSON_KINDS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
+            </select>
+          </div>
+          ${recentPpl.length > 0 && html`
+            <div class="suggests">
+              <span class="sg-label">最近</span>
+              ${recentPpl.map((p) => html`<button class="chip" onClick=${() => pickPerson(p)}>${p.name}</button>`)}
+            </div>`}
+        </div>`}
+
+      <button class="fold" onClick=${() => setShowContrast(!showContrast)}>
+        対になる景色${showContrast ? '　−' : '　＋'}</button>
+      ${showContrast && html`
+        <input class="line-in reveal" placeholder="強いて言えば反対は… こもった / キンキン"
+          value=${contrast} onInput=${(e) => setContrast(e.target.value)} />`}
+
+      <textarea class="note-write" placeholder="余白に書き添える（任意）" value=${note}
         onInput=${(e) => setNote(e.target.value)}></textarea>
 
-      <div class="qi-foot">
-        <select class="via" value=${via} onChange=${(e) => setVia(e.target.value)}>
-          ${ORIGINS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
-        </select>
-        <button class="save" disabled=${!term.trim()} onClick=${() => doSave(false)}>
-          ${saved === 'done' ? '✓ 記録した' : '記録する'}
-        </button>
-      </div>
-      <button class="save-next" disabled=${!term.trim()} onClick=${() => doSave(true)}>
-        ${saved === 'next' ? '✓ 次へ（文脈を保持）' : '保存して次の言葉 ↻'}
-      </button>
+      ${ctx && html`<div class="ctx-hint">${ctx}</div>`}
+
+      <button class=${'save' + (saved === 'done' ? ' ok' : '')} disabled=${!term.trim()}
+        onClick=${() => doSave(false)}>${saved === 'done' ? '残しました' : '景色を残す'}</button>
+      <button class=${'save-next' + (saved === 'next' ? ' ok' : '')} disabled=${!term.trim()}
+        onClick=${() => doSave(true)}>${saved === 'next' ? '次の景色へ…' : '次の景色へ'}</button>
 
       <datalist id="persons">${persons.map((p) => html`<option value=${p.name} />`)}</datalist>
       <datalist id="sources">${sources.map((s) => html`<option value=${s.label} />`)}</datalist>
     </section>`;
 }
 
-// --- 最近の記録 --------------------------------------------------------------
-function RecentList({ tick }) {
+// --- 観察ログ（景色カード） --------------------------------------------------
+function ObservationLog({ tick }) {
   const [items, setItems] = useState([]);
-  useEffect(() => { repo.recentUtterances(8).then(setItems); }, [tick]);
+  useEffect(() => { repo.recentUtterances(12).then(setItems); }, [tick]);
   if (!items.length) return null;
   return html`
-    <section class="card">
-      <div class="sec-title">最近の記録</div>
-      <div class="recent">
+    <section class="section">
+      <div class="section-head">観察ログ</div>
+      <div class="cards">
         ${items.map((u) => html`
-          <div class="rec">
-            <span class=${'vm ' + vCls[u.valence]}>${vMark[u.valence]}</span>
-            <a href=${'#/term/' + encodeURIComponent(u.termId)}>${u.term ? u.term.label : '—'}</a>
-            <span class="ftag">${focusLabel[u.focus || 'performance']}</span>
-            <span class="meta">
-              ${[u.source && u.source.label, u.person && u.person.name].filter(Boolean).join(' ・ ')}
-              ${u.timestamp ? ` @${u.timestamp}` : ''}
-              ${u.contrastTerm ? ` ⇄ ${u.contrastTerm.label}` : ''}
-            </span>
-          </div>`)}
-      </div>
-    </section>`;
-}
-
-// --- 言葉一覧 ----------------------------------------------------------------
-function TermList({ tick }) {
-  const [terms, setTerms] = useState([]);
-  useEffect(() => { repo.allTermsWithCounts().then(setTerms); }, [tick]);
-  if (!terms.length) return null;
-  return html`
-    <section class="card">
-      <div class="sec-title">言葉 (${terms.length})</div>
-      <div class="termlist">
-        ${terms.map((t) => html`
-          <a class="chip" href=${'#/term/' + encodeURIComponent(t.id)}>
-            ${t.label} <span class="cnt">${t.count}</span>
+          <a class="scene-card" href=${'#/term/' + encodeURIComponent(u.termId)}>
+            <div class="sc-term">
+              <span class=${'vdot ' + vCls[u.valence]}></span>
+              ${u.term ? u.term.label : '—'}
+              ${u.contrastTerm ? html`<span class="sc-contrast">／ ${u.contrastTerm.label}</span>` : ''}
+            </div>
+            <div class="sc-meta">
+              <span class="sc-focus">${focusLabel[u.focus || 'performance']}</span>
+              ${[u.source && u.source.label, u.person && u.person.name].filter(Boolean).map((x) => html`<span>${x}</span>`)}
+              ${u.timestamp ? html`<span>${u.timestamp}</span>` : ''}
+              ${u.locationNote ? html`<span>${u.locationNote}</span>` : ''}
+            </div>
+            ${u.note ? html`<div class="sc-note">${u.note}</div>` : ''}
           </a>`)}
       </div>
     </section>`;
 }
 
-// --- 言葉詳細 ----------------------------------------------------------------
+// --- ことばの景色（タグクラウド的ナビ） --------------------------------------
+function TermCloud({ tick }) {
+  const [terms, setTerms] = useState([]);
+  useEffect(() => { repo.allTermsWithCounts().then(setTerms); }, [tick]);
+  if (!terms.length) return null;
+  const max = Math.max(...terms.map((t) => t.count), 1);
+  return html`
+    <section class="section">
+      <div class="section-head">ことば（${terms.length}）</div>
+      <div class="cloud">
+        ${terms.map((t) => html`
+          <a class="cloud-term" href=${'#/term/' + encodeURIComponent(t.id)}
+            style=${`font-size:${(0.95 + (t.count / max) * 0.85).toFixed(2)}rem`}>${t.label}</a>`)}
+      </div>
+    </section>`;
+}
+
+// --- 詳細（観察ノート） ------------------------------------------------------
 function TermDetail({ termId }) {
   const [d, setD] = useState(null);
   useEffect(() => { repo.termDetail(termId).then(setD); }, [termId]);
-  if (!d) return html`<div class="card">読み込み中…</div>`;
+  if (!d) return html`<div class="section">…</div>`;
 
   const total = d.valence.positive + d.valence.neutral + d.valence.negative;
   const pct = (n) => (total ? (n / total) * 100 : 0);
+  const cloudMax = Math.max(...d.nearList.map((n) => n.weight), 1);
 
   return html`
     <div class="detail">
       <button class="back" onClick=${() => go('#/')}>← もどる</button>
-      <div class="d-title">
-        <span class="d-label">${d.term.label}</span>
-        <span class="d-count">${d.total}件の発話</span>
-      </div>
-      ${d.term.aliases.length > 0 && html`
-        <div class="aliases">表記ゆれ: ${d.term.aliases.join('、')}</div>`}
 
-      <div class="sec-title">良し悪しの内訳</div>
+      <div class="d-hero">
+        <div class="d-term">${d.term.label}</div>
+        <div class="d-count">${d.total} の観察</div>
+        ${d.term.aliases.length > 0 && html`<div class="d-aliases">${d.term.aliases.join('・')}</div>`}
+      </div>
+
       <div class="vbar">
         <div class="seg v-pos" style=${`flex:${pct(d.valence.positive)}`}></div>
         <div class="seg v-neu" style=${`flex:${pct(d.valence.neutral)}`}></div>
         <div class="seg v-neg" style=${`flex:${pct(d.valence.negative)}`}></div>
       </div>
       <div class="vleg">
-        <span><i class="dot v-pos"></i>ポジ ${d.valence.positive}</span>
-        <span><i class="dot v-neu"></i>中立 ${d.valence.neutral}</span>
-        <span><i class="dot v-neg"></i>ネガ ${d.valence.negative}</span>
+        <span><i class="vdot v-pos"></i>${vWord.positive} ${d.valence.positive}</span>
+        <span><i class="vdot v-neu"></i>${vWord.neutral} ${d.valence.neutral}</span>
+        <span><i class="vdot v-neg"></i>${vWord.negative} ${d.valence.negative}</span>
       </div>
 
       ${d.flag && html`
-        <div class="flag">人によって指すもの・評価が割れているかも</div>`}
-
-      <div class="sec-title">誰が使ったか</div>
-      <div class="who">
-        ${d.byPerson.length === 0 && html`<div class="muted">（記録なし）</div>`}
-        ${d.byPerson.map((p) => html`
-          <div class="who-row">
-            <span>${p.person ? p.person.name : '（人物なし）'}</span>
-            <span class="who-v">
-              ${p.positive ? html`<span class="v-pos">ポジ×${p.positive}</span>` : ''}
-              ${p.neutral ? html`<span class="v-neu">中立×${p.neutral}</span>` : ''}
-              ${p.negative ? html`<span class="v-neg">ネガ×${p.negative}</span>` : ''}
-            </span>
-          </div>`)}
-      </div>
+        <div class="murmur">人によって、見える景色が違うようです</div>`}
 
       ${d.nearList.length > 0 && html`
-        <div class="sec-title">≒ よく一緒に使われる言葉</div>
-        <div class="termlist">
+        <div class="section-head q">よく一緒に現れる景色</div>
+        <div class="cloud">
           ${d.nearList.map((n) => html`
-            <a class="chip" href=${'#/term/' + encodeURIComponent(n.term.id)}>
-              ${n.term.label} <span class="cnt">${n.weight}</span></a>`)}
+            <a class="cloud-term" href=${'#/term/' + encodeURIComponent(n.term.id)}
+              style=${`font-size:${(0.95 + (n.weight / cloudMax) * 0.7).toFixed(2)}rem`}>${n.term.label}</a>`)}
         </div>`}
 
       ${d.contrasts.length > 0 && html`
-        <div class="sec-title">⇄ 反対に置かれた言葉（人ごと）</div>
+        <div class="section-head q">対になる景色</div>
         <div class="contrasts">
           ${d.contrasts.map((c) => html`
-            <div class="con-row">
-              <span class="muted">${c.person ? c.person.name : '不明'}:</span>
-              ${d.term.label} ⇄ <a href=${'#/term/' + encodeURIComponent(c.contrastTerm.id)}>${c.contrastTerm.label}</a>
+            <div class="con">
+              <div class="con-pair">
+                <span class="con-l">${d.term.label}</span>
+                <span class="con-arrow">←→</span>
+                <a class="con-r" href=${'#/term/' + encodeURIComponent(c.contrastTerm.id)}>${c.contrastTerm.label}</a>
+              </div>
+              ${c.person && html`<div class="con-who">${c.person.name}</div>`}
             </div>`)}
         </div>`}
 
-      <div class="sec-title">Focus内訳</div>
-      <div class="focus-counts">
+      <div class="section-head q">何を聴いていたか</div>
+      <div class="cloud">
         ${FOCUSES.filter(([k]) => d.focusCounts[k]).map(([k, l]) => html`
-          <span class="fc"><span class="fc-l">${l}</span> <span class="fc-n">${d.focusCounts[k]}</span></span>`)}
+          <span class="fc">${l}<span class="fc-n">${d.focusCounts[k]}</span></span>`)}
       </div>
 
-      <div class="sec-title">発話の記録 (${d.total})</div>
-      <div class="ulist">
+      <div class="section-head q">観察ログ</div>
+      <div class="cards">
         ${d.utterances.map((u) => html`
-          <div class="urow">
-            <span class=${'vm ' + vCls[u.valence]}>${vMark[u.valence]}</span>
-            <span class="ftag">${focusLabel[u.focus || 'performance']}</span>
-            ${u.timestamp && html`<span class="uts">@${u.timestamp}</span>`}
-            ${u.locationNote && html`<span class="uloc">${u.locationNote}</span>`}
-            <span class="umeta">
-              ${[u.source && u.source.label, u.person && u.person.name, originLabel[u.observedVia]].filter(Boolean).join(' ・ ')}
-            </span>
+          <div class="scene-card flat">
+            <div class="sc-meta">
+              <span class=${'vdot ' + vCls[u.valence]}></span>
+              <span class="sc-focus">${focusLabel[u.focus || 'performance']}</span>
+              ${u.timestamp ? html`<span>${u.timestamp}</span>` : ''}
+              ${u.locationNote ? html`<span>${u.locationNote}</span>` : ''}
+              ${[u.source && u.source.label, u.person && u.person.name, originLabel[u.observedVia]].filter(Boolean).map((x) => html`<span>${x}</span>`)}
+            </div>
+            ${u.note ? html`<div class="sc-note">${u.note}</div>` : ''}
           </div>`)}
       </div>
     </div>`;
 }
 
-// --- バックアップ（エクスポート/インポート） --------------------------------
+// --- バックアップ ------------------------------------------------------------
 function BackupMenu({ onChange }) {
   const exportJson = async () => {
     const data = await repo.exportAll();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `tone-vocab-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `chokei-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -417,8 +422,8 @@ function BackupMenu({ onChange }) {
   };
   return html`
     <div class="backup">
-      <button onClick=${exportJson} title="バックアップ書き出し">⤓</button>
-      <label class="imp" title="バックアップ読み込み">⤒
+      <button onClick=${exportJson} aria-label="書き出し" title="書き出し">⤓</button>
+      <label class="imp" aria-label="読み込み" title="読み込み">⤒
         <input type="file" accept="application/json" onChange=${importJson} hidden />
       </label>
     </div>`;

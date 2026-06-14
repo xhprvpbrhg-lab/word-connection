@@ -85,12 +85,29 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--info-ink); 
 .vbtn.on.v-neu { background: var(--neu-bg); color: var(--ink); border-color: var(--line2); }
 .vbtn.on.v-neg { background: var(--neg-bg); color: var(--neg); border-color: var(--neg); }
 
+/* Focus（観察対象） */
+.sub { font-size: 12px; color: var(--muted); margin: 12px 0 6px; }
+.sub.loc-cue { color: var(--info-ink); margin-top: 12px; }
+.focuses { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.fbtn {
+  font-size: 13px; padding: 7px 12px; cursor: pointer; color: var(--muted);
+  background: var(--surface); border: 0.5px solid var(--line2); border-radius: var(--radius-sm);
+}
+.fbtn.on { background: var(--info-bg); color: var(--info-ink); border-color: var(--info-ink); }
+
 .opt-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .opt { display: flex; gap: 8px; align-items: center; }
 .opt label { font-size: 13px; color: var(--muted); width: 56px; flex: none; }
 .opt input { flex: 1; min-width: 0; }
 .opt select { flex: none; width: 110px; }
 .ref { width: 100%; }
+
+.recent-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -2px 0 2px; }
+.rc-label { font-size: 12px; color: var(--hint); }
+
+.loc { display: flex; gap: 8px; margin-bottom: 10px; }
+.loc .ts { flex: none; width: 120px; }
+.loc .locnote { flex: 1; min-width: 0; }
 
 .disclose {
   display: block; width: 100%; text-align: left; font-size: 13px; color: var(--muted);
@@ -106,6 +123,11 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--info-ink); 
   background: var(--info-bg); color: var(--info-ink); border: 0.5px solid var(--info-ink); border-radius: var(--radius-sm);
 }
 .save:disabled { opacity: 0.5; cursor: default; }
+.save-next {
+  width: 100%; margin-top: 8px; padding: 10px 0; font-size: 14px; cursor: pointer;
+  background: var(--surface); color: var(--ink); border: 0.5px solid var(--line2); border-radius: var(--radius-sm);
+}
+.save-next:disabled { opacity: 0.5; cursor: default; }
 
 /* チップ */
 .chip {
@@ -122,6 +144,10 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--info-ink); 
 .rec { font-size: 14px; display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
 .rec a { color: var(--ink); text-decoration: none; font-weight: 500; }
 .rec .meta { font-size: 12px; color: var(--hint); }
+.ftag {
+  font-size: 11px; color: var(--muted); background: var(--neu-bg);
+  border-radius: var(--radius-sm); padding: 1px 6px;
+}
 .vm { font-weight: 600; }
 .v-pos { color: var(--pos); }
 .v-neg { color: var(--neg); }
@@ -158,3 +184,17 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--info-ink); 
 .contrasts { display: flex; flex-direction: column; gap: 8px; }
 .con-row { font-size: 14px; }
 .con-row a, .contrasts a { color: var(--ink); }
+
+/* Focus内訳 */
+.focus-counts { display: flex; flex-wrap: wrap; gap: 8px; }
+.fc {
+  font-size: 13px; background: var(--neu-bg); border-radius: var(--radius-sm); padding: 4px 10px;
+}
+.fc-n { color: var(--muted); font-size: 12px; }
+
+/* 発話の記録一覧 */
+.ulist { display: flex; flex-direction: column; gap: 8px; }
+.urow { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+.uts { font-size: 12px; color: var(--info-ink); }
+.uloc { font-size: 12px; color: var(--ink); }
+.umeta { font-size: 12px; color: var(--hint); }

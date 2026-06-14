@@ -1,6 +1,6 @@
 // 最小のオフラインキャッシュ。アプリ本体（自オリジンの静的ファイル）だけ先読み。
 // esm.sh のモジュールは実行時にブラウザがキャッシュする。
-const CACHE = 'tone-vocab-v1';
+const CACHE = 'tone-vocab-v2';
 const ASSETS = [
   './', './index.html', './app.js', './db.js', './styles.css',
   './manifest.webmanifest', './icon.svg',

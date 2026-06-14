@@ -11,6 +11,19 @@ db.version(1).stores({
   utterances: 'id, termId, personId, sourceId, contrastTermId, valence, createdAt',
 });
 
+// v2: Utterance に focus（観察対象）を追加し索引化。timestamp / locationNote も追加（索引不要）。
+// 既存データは focus 未設定なので 'performance' を補完する。
+db.version(2).stores({
+  utterances: 'id, termId, personId, sourceId, contrastTermId, valence, focus, createdAt',
+}).upgrade((tx) => tx.table('utterances').toCollection().modify((u) => {
+  if (!u.focus) u.focus = 'performance';
+  if (u.timestamp == null) u.timestamp = '';
+  if (u.locationNote == null) u.locationNote = '';
+}));
+
+// focus の許容キー（不正値は performance に丸める）
+export const FOCUS_KEYS = ['performance', 'instrument', 'interpretation', 'recording', 'acoustics', 'moment'];
+
 // --- ユーティリティ ---------------------------------------------------------
 
 // 時系列ソート可能なID（簡易ULID風: 時刻48bit + ランダム）
@@ -95,6 +108,7 @@ export async function addUtterance(input) {
     personName, personKind,
     sourceLabel, sourceKind, sourceRef,
     contrastLabel, aspect = '', note = '', observedVia = 'direct',
+    focus = 'performance', timestamp = '', locationNote = '',
   } = input;
 
   if (!termLabel || !valence) throw new Error('termLabel と valence は必須');
@@ -111,6 +125,9 @@ export async function addUtterance(input) {
     personId: person ? person.id : null,
     sourceId: source ? source.id : null,
     contrastTermId: contrast ? contrast.id : null,
+    focus: FOCUS_KEYS.includes(focus) ? focus : 'performance',
+    timestamp: (timestamp || '').trim(), // 空は実質未保存（表示時に非表示）
+    locationNote: (locationNote || '').trim(),
     aspect, note, observedVia,
     createdAt: nowISO(),
   };
@@ -199,7 +216,17 @@ export async function termDetail(termId) {
   const distinctContrasts = new Set(contrasts.map((c) => c.contrastTerm.id));
   const flag = (valence.positive > 0 && valence.negative > 0) || distinctContrasts.size >= 2;
 
-  return { term, total: us.length, valence, byPerson: Object.values(byPerson), nearList, contrasts, flag };
+  // Focus 内訳（集計用）
+  const focusCounts = {};
+  us.forEach((u) => { const f = u.focus || 'performance'; focusCounts[f] = (focusCounts[f] || 0) + 1; });
+
+  // 発話一覧（新しい順）。表示名を付ける。
+  const list = (await hydrate(us)).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+
+  return {
+    term, total: us.length, valence, byPerson: Object.values(byPerson),
+    nearList, contrasts, flag, focusCounts, utterances: list,
+  };
 }
 
 // --- バックアップ ------------------------------------------------------------
@@ -208,17 +235,24 @@ export async function exportAll() {
   const [terms, persons, sources, utterances] = await Promise.all([
     db.terms.toArray(), db.persons.toArray(), db.sources.toArray(), db.utterances.toArray(),
   ]);
-  return { version: 1, exportedAt: nowISO(), terms, persons, sources, utterances };
+  return { version: 2, exportedAt: nowISO(), terms, persons, sources, utterances };
 }
 
 export async function importAll(data) {
-  if (!data || data.version !== 1) throw new Error('対応していないバックアップ形式');
+  if (!data || (data.version !== 1 && data.version !== 2)) throw new Error('対応していないバックアップ形式');
+  // v1 バックアップは focus 等が無いので補完する（後方互換）。
+  const utterances = (data.utterances || []).map((u) => ({
+    ...u,
+    focus: u.focus || 'performance',
+    timestamp: u.timestamp || '',
+    locationNote: u.locationNote || '',
+  }));
   await db.transaction('rw', db.terms, db.persons, db.sources, db.utterances, async () => {
     await Promise.all([db.terms.clear(), db.persons.clear(), db.sources.clear(), db.utterances.clear()]);
     await db.terms.bulkAdd(data.terms || []);
     await db.persons.bulkAdd(data.persons || []);
     await db.sources.bulkAdd(data.sources || []);
-    await db.utterances.bulkAdd(data.utterances || []);
+    await db.utterances.bulkAdd(utterances);
   });
 }
 
@@ -248,3 +282,18 @@ export async function termSuggestions(text, limit = 6) {
 
 export async function listPersons() { return db.persons.orderBy('name').toArray(); }
 export async function listSources() { return db.sources.orderBy('label').toArray(); }
+
+// 直近の発話から、使った順（重複なし）に Source/Person を返す。再利用の優先表示用。
+async function recentByField(field, mapTable, limit) {
+  const us = await db.utterances.orderBy('createdAt').reverse().limit(300).toArray();
+  const order = [];
+  const seen = new Set();
+  for (const u of us) {
+    const id = u[field];
+    if (id && !seen.has(id)) { seen.add(id); order.push(id); if (order.length >= limit) break; }
+  }
+  const map = Object.fromEntries((await mapTable.toArray()).map((x) => [x.id, x]));
+  return order.map((id) => map[id]).filter(Boolean);
+}
+export function recentSources(limit = 5) { return recentByField('sourceId', db.sources, limit); }
+export function recentPersons(limit = 5) { return recentByField('personId', db.persons, limit); }

@@ -19,6 +19,15 @@ const SOURCE_KINDS = [
 const PERSON_KINDS = [
   ['self', '自分'], ['pianist', 'ピアニスト'], ['commenter', 'コメント主'], ['other', 'その他'],
 ];
+const FOCUSES = [
+  ['performance', '演奏全体'], ['instrument', '楽器'], ['interpretation', '解釈'],
+  ['recording', '録音'], ['acoustics', '空間'], ['moment', '瞬間'],
+];
+const focusLabel = Object.fromEntries(FOCUSES);
+const ORIGINS = [
+  ['direct', '自分の体感'], ['x', 'X'], ['youtube_comment', 'YTコメント'], ['other', 'その他'],
+];
+const originLabel = Object.fromEntries(ORIGINS);
 
 // --- ルーティング（ハッシュ） ----------------------------------------------
 function useHashRoute() {
@@ -65,6 +74,7 @@ function QuickInput({ onSaved }) {
   const [valence, setValence] = useState('positive');
   const [suggest, setSuggest] = useState([]);
   const [fileUnder, setFileUnder] = useState(null); // 人が確定した「まとめ先」既存Term
+  const [focus, setFocus] = useState('performance');
   const [person, setPerson] = useState('');
   const [personKind, setPersonKind] = useState('pianist');
   const [source, setSource] = useState('');
@@ -74,14 +84,22 @@ function QuickInput({ onSaved }) {
   const [contrast, setContrast] = useState('');
   const [note, setNote] = useState('');
   const [via, setVia] = useState('direct');
+  const [showLocation, setShowLocation] = useState(false);
+  const [timestamp, setTimestamp] = useState('');
+  const [locationNote, setLocationNote] = useState('');
   const [persons, setPersons] = useState([]);
   const [sources, setSources] = useState([]);
-  const [saved, setSaved] = useState(false);
+  const [recentSrc, setRecentSrc] = useState([]);
+  const [recentPpl, setRecentPpl] = useState([]);
+  const [saved, setSaved] = useState('');
 
-  useEffect(() => {
+  const reloadLists = () => {
     repo.listPersons().then(setPersons);
     repo.listSources().then(setSources);
-  }, []);
+    repo.recentSources(5).then(setRecentSrc);
+    repo.recentPersons(5).then(setRecentPpl);
+  };
+  useEffect(reloadLists, []);
 
   useEffect(() => {
     let live = true;
@@ -89,43 +107,56 @@ function QuickInput({ onSaved }) {
     if (!t) { setSuggest([]); return; }
     repo.termSuggestions(t).then((s) => {
       if (!live) return;
-      // 完全一致は getOrCreateTerm が自動で同一視するので候補から除く
-      setSuggest(s.filter((x) => x.label !== t));
+      setSuggest(s.filter((x) => x.label !== t)); // 完全一致は自動同一視されるので除く
     });
     return () => { live = false; };
   }, [term]);
 
-  // 言葉を打ち直したら、まとめ先の確定は解除
+  // Focus = 瞬間 のときは場所・Timestamp欄を自動で開く
+  useEffect(() => { if (focus === 'moment') setShowLocation(true); }, [focus]);
+
   const onTerm = (v) => { setTerm(v); setFileUnder(null); };
 
-  const reset = () => {
-    setTerm(''); setContrast(''); setNote(''); setShowContrast(false);
-    setSuggest([]); setFileUnder(null);
+  // 既存Sourceを選んだら kind / ref を自動で紐づける
+  const onSource = (v) => {
+    setSource(v);
+    const found = sources.find((s) => s.label === v);
+    if (found) { setSourceKind(found.kind); setSourceRef(found.ref || ''); }
   };
+  const pickSource = (s) => { setSource(s.label); setSourceKind(s.kind); setSourceRef(s.ref || ''); };
+  const pickPerson = (p) => { setPerson(p.name); setPersonKind(p.kind); };
 
-  const save = async () => {
+  // keepContext=true: source/person/origin/focus/timestamp/locationNote を維持し term/note/contrast だけ消す
+  const doSave = async (keepContext) => {
     const label = term.trim();
     if (!label) return;
-    // まとめ先を人が確定した場合は、打った表記を alias 化してから既存の label を使う
     let termLabel = label;
     if (fileUnder) {
       if (label !== fileUnder.label) await repo.addAlias(fileUnder.id, label);
       termLabel = fileUnder.label;
     }
     await repo.addUtterance({
-      termLabel, valence,
+      termLabel, valence, focus,
       personName: person.trim() || null, personKind,
       sourceLabel: source.trim() || null, sourceKind, sourceRef: sourceRef.trim(),
       contrastLabel: contrast.trim() || null,
       note: note.trim(), observedVia: via,
+      timestamp, locationNote,
     });
-    reset();
-    repo.listPersons().then(setPersons);
-    repo.listSources().then(setSources);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1400);
+    reloadLists();
+    // term レベルのみクリア
+    setTerm(''); setContrast(''); setNote(''); setShowContrast(false);
+    setSuggest([]); setFileUnder(null);
+    if (!keepContext) {
+      // 通常保存: 瞬間的な文脈はゆるめる（source/person/origin は利便のため維持）
+      setFocus('performance'); setTimestamp(''); setLocationNote(''); setShowLocation(false);
+    }
+    setSaved(keepContext ? 'next' : 'done');
+    setTimeout(() => setSaved(''), 1400);
     onSaved && onSaved();
   };
+
+  const locOpen = showLocation || focus === 'moment';
 
   return html`
     <section class="card qi">
@@ -153,6 +184,12 @@ function QuickInput({ onSaved }) {
             onClick=${() => setValence(v.key)}>${v.label}</button>`)}
       </div>
 
+      <div class="sub">観察対象</div>
+      <div class="focuses">
+        ${FOCUSES.map(([k, l]) => html`
+          <button class=${'fbtn' + (focus === k ? ' on' : '')} onClick=${() => setFocus(k)}>${l}</button>`)}
+      </div>
+
       <div class="opt-row">
         <div class="opt">
           <label>誰が</label>
@@ -161,17 +198,42 @@ function QuickInput({ onSaved }) {
             ${PERSON_KINDS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
           </select>
         </div>
+        ${recentPpl.length > 0 && html`
+          <div class="recent-chips">
+            <span class="rc-label">最近:</span>
+            ${recentPpl.map((p) => html`
+              <button class="chip ghost" onClick=${() => pickPerson(p)}>${p.name}</button>`)}
+          </div>`}
+
         <div class="opt">
           <label>何について</label>
-          <input list="sources" placeholder="任意" value=${source} onInput=${(e) => setSource(e.target.value)} />
+          <input list="sources" placeholder="任意" value=${source} onInput=${(e) => onSource(e.target.value)} />
           <select value=${sourceKind} onChange=${(e) => setSourceKind(e.target.value)}>
             ${SOURCE_KINDS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
           </select>
         </div>
+        ${recentSrc.length > 0 && html`
+          <div class="recent-chips">
+            <span class="rc-label">最近:</span>
+            ${recentSrc.map((s) => html`
+              <button class="chip ghost" onClick=${() => pickSource(s)}>${s.label}</button>`)}
+          </div>`}
         ${source.trim() && html`
           <input class="ref" placeholder="URL / 製番など（任意）" value=${sourceRef}
             onInput=${(e) => setSourceRef(e.target.value)} />`}
       </div>
+
+      ${focus === 'moment'
+        ? html`<div class="sub loc-cue">瞬間：場所・Timestampを指定</div>`
+        : html`<button class="disclose" onClick=${() => setShowLocation(!showLocation)}>
+            ◎ 場所・Timestampを指定（任意）${showLocation ? '▲' : '▼'}</button>`}
+      ${locOpen && html`
+        <div class="loc">
+          <input class="ts" placeholder="Timestamp 例 2:14" value=${timestamp}
+            onInput=${(e) => setTimestamp(e.target.value)} />
+          <input class="locnote" placeholder="場所メモ 例 ppの入り" value=${locationNote}
+            onInput=${(e) => setLocationNote(e.target.value)} />
+        </div>`}
 
       <button class="disclose" onClick=${() => setShowContrast(!showContrast)}>
         ⇄ 対比（任意）— 強いて言えば反対は？ ${showContrast ? '▲' : '▼'}
@@ -185,15 +247,15 @@ function QuickInput({ onSaved }) {
 
       <div class="qi-foot">
         <select class="via" value=${via} onChange=${(e) => setVia(e.target.value)}>
-          <option value="direct">自分の体感</option>
-          <option value="x">X</option>
-          <option value="youtube_comment">YTコメント</option>
-          <option value="other">その他</option>
+          ${ORIGINS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
         </select>
-        <button class="save" disabled=${!term.trim()} onClick=${save}>
-          ${saved ? '✓ 記録した' : '記録する'}
+        <button class="save" disabled=${!term.trim()} onClick=${() => doSave(false)}>
+          ${saved === 'done' ? '✓ 記録した' : '記録する'}
         </button>
       </div>
+      <button class="save-next" disabled=${!term.trim()} onClick=${() => doSave(true)}>
+        ${saved === 'next' ? '✓ 次へ（文脈を保持）' : '保存して次の言葉 ↻'}
+      </button>
 
       <datalist id="persons">${persons.map((p) => html`<option value=${p.name} />`)}</datalist>
       <datalist id="sources">${sources.map((s) => html`<option value=${s.label} />`)}</datalist>
@@ -213,8 +275,10 @@ function RecentList({ tick }) {
           <div class="rec">
             <span class=${'vm ' + vCls[u.valence]}>${vMark[u.valence]}</span>
             <a href=${'#/term/' + encodeURIComponent(u.termId)}>${u.term ? u.term.label : '—'}</a>
+            <span class="ftag">${focusLabel[u.focus || 'performance']}</span>
             <span class="meta">
-              ${[u.person && u.person.name, u.source && u.source.label].filter(Boolean).join(' ・ ')}
+              ${[u.source && u.source.label, u.person && u.person.name].filter(Boolean).join(' ・ ')}
+              ${u.timestamp ? ` @${u.timestamp}` : ''}
               ${u.contrastTerm ? ` ⇄ ${u.contrastTerm.label}` : ''}
             </span>
           </div>`)}
@@ -304,6 +368,26 @@ function TermDetail({ termId }) {
               ${d.term.label} ⇄ <a href=${'#/term/' + encodeURIComponent(c.contrastTerm.id)}>${c.contrastTerm.label}</a>
             </div>`)}
         </div>`}
+
+      <div class="sec-title">Focus内訳</div>
+      <div class="focus-counts">
+        ${FOCUSES.filter(([k]) => d.focusCounts[k]).map(([k, l]) => html`
+          <span class="fc"><span class="fc-l">${l}</span> <span class="fc-n">${d.focusCounts[k]}</span></span>`)}
+      </div>
+
+      <div class="sec-title">発話の記録 (${d.total})</div>
+      <div class="ulist">
+        ${d.utterances.map((u) => html`
+          <div class="urow">
+            <span class=${'vm ' + vCls[u.valence]}>${vMark[u.valence]}</span>
+            <span class="ftag">${focusLabel[u.focus || 'performance']}</span>
+            ${u.timestamp && html`<span class="uts">@${u.timestamp}</span>`}
+            ${u.locationNote && html`<span class="uloc">${u.locationNote}</span>`}
+            <span class="umeta">
+              ${[u.source && u.source.label, u.person && u.person.name, originLabel[u.observedVia]].filter(Boolean).join(' ・ ')}
+            </span>
+          </div>`)}
+      </div>
     </div>`;
 }
 

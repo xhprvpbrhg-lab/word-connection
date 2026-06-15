@@ -1,8 +1,8 @@
 // 最小のオフラインキャッシュ。アプリ本体（自オリジンの静的ファイル）だけ先読み。
 // esm.sh のモジュールは実行時にブラウザがキャッシュする。
-const CACHE = 'chokei-v5';
+const CACHE = 'chokei-v6';
 const ASSETS = [
-  './', './index.html', './app.js', './db.js', './styles.css',
+  './', './index.html', './app.js', './db.js', './metadata.js', './styles.css',
   './manifest.webmanifest', './icon.svg', './icon.png', './icondark.png',
 ];
 

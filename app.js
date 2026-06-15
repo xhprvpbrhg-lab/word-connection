@@ -2,6 +2,7 @@ import { h, render } from 'https://esm.sh/preact@10';
 import { useState, useEffect, useCallback } from 'https://esm.sh/preact@10/hooks';
 import htm from 'https://esm.sh/htm@3';
 import * as repo from './db.js';
+import { fetchSourceMetadata, detectProvider } from './metadata.js';
 
 const html = htm.bind(h);
 
@@ -99,6 +100,7 @@ function NoteInput({ onSaved }) {
   const [sources, setSources] = useState([]);
   const [recentSrc, setRecentSrc] = useState([]);
   const [recentPpl, setRecentPpl] = useState([]);
+  const [metaStatus, setMetaStatus] = useState(''); // '' | 'loading' | 'error'
   const [saved, setSaved] = useState('');
   const [ripple, setRipple] = useState(false);
   const [ph] = useState(pickPlaceholder);
@@ -123,6 +125,27 @@ function NoteInput({ onSaved }) {
   }, [term]);
 
   useEffect(() => { if (focus === 'moment') setShowLocation(true); }, [focus]);
+
+  // Source URL欄に対応URLが入ったら、Source名が空のときだけタイトルを自動取得（補助機能）。
+  // 手入力があれば上書きしない。失敗しても保存は妨げない。
+  useEffect(() => {
+    const url = sourceRef.trim();
+    if (!url || source.trim() || !detectProvider(url)) { setMetaStatus(''); return; }
+    let live = true;
+    setMetaStatus('loading');
+    const timer = setTimeout(async () => {
+      const meta = await fetchSourceMetadata(url);
+      if (!live) return;
+      if (meta && meta.title) {
+        setSource((prev) => (prev.trim() ? prev : meta.title)); // 取得中に手入力されていたら尊重
+        if (meta.provider === 'youtube') setSourceKind('youtube');
+        setMetaStatus('');
+      } else {
+        setMetaStatus('error');
+      }
+    }, 500);
+    return () => { live = false; clearTimeout(timer); };
+  }, [sourceRef, source]);
 
   const onTerm = (v) => { setTerm(v); setFileUnder(null); };
   const onSource = (v) => {
@@ -215,6 +238,10 @@ function NoteInput({ onSaved }) {
         <div class="reveal">
           <input class="line-in" list="sources" placeholder="動画 / ピアノ / 録音 …"
             value=${source} onInput=${(e) => onSource(e.target.value)} />
+          <input class="line-in" placeholder="YouTube URL / 製番（任意）" value=${sourceRef}
+            onInput=${(e) => setSourceRef(e.target.value)} />
+          ${metaStatus === 'loading' && html`<div class="meta-status">タイトル取得中…</div>`}
+          ${metaStatus === 'error' && html`<div class="meta-status err">取得できませんでした</div>`}
           <div class="mini-row">
             <select value=${sourceKind} onChange=${(e) => setSourceKind(e.target.value)}>
               ${SOURCE_KINDS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
@@ -223,9 +250,6 @@ function NoteInput({ onSaved }) {
               ${ORIGINS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
             </select>
           </div>
-          ${source.trim() && html`
-            <input class="line-in" placeholder="URL / 製番（任意）" value=${sourceRef}
-              onInput=${(e) => setSourceRef(e.target.value)} />`}
           ${recentSrc.length > 0 && html`
             <div class="suggests">
               <span class="sg-label">最近</span>

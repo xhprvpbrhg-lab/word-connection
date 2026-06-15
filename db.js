@@ -24,6 +24,14 @@ db.version(2).stores({
 // focus の許容キー（不正値は performance に丸める）
 export const FOCUS_KEYS = ['performance', 'instrument', 'interpretation', 'recording', 'acoustics', 'moment'];
 
+// v3: Person に url（索引化）/ provider を追加。既存Personは url='' / provider='manual' で補完。
+db.version(3).stores({
+  persons: 'id, name, kind, url, createdAt',
+}).upgrade((tx) => tx.table('persons').toCollection().modify((p) => {
+  if (p.url == null) p.url = '';
+  if (p.provider == null) p.provider = 'manual';
+}));
+
 // --- ユーティリティ ---------------------------------------------------------
 
 // 時系列ソート可能なID（簡易ULID風: 時刻48bit + ランダム）
@@ -81,11 +89,25 @@ export async function addAlias(termId, alias) {
 
 // --- Person / Source --------------------------------------------------------
 
-export async function getOrCreatePerson(name, kind = 'other') {
-  if (!name) return null;
-  const found = await db.persons.where('name').equals(name).first();
-  if (found) return found;
-  const p = { id: newId(), name, kind, handle: '', note: '', createdAt: nowISO() };
+export async function getOrCreatePerson(name, kind = 'other', url = '', provider = 'manual') {
+  if (!name && !url) return null;
+  // 同じURLのPersonは重複作成しない
+  if (url) {
+    const byUrl = await db.persons.where('url').equals(url).first();
+    if (byUrl) return byUrl;
+  }
+  if (name) {
+    const byName = await db.persons.where('name').equals(name).first();
+    if (byName) {
+      // URLが新たに分かったら補完
+      if (url && !byName.url) {
+        await db.persons.update(byName.id, { url, provider });
+        return { ...byName, url, provider };
+      }
+      return byName;
+    }
+  }
+  const p = { id: newId(), name: name || url, kind, handle: '', url, provider, note: '', createdAt: nowISO() };
   await db.persons.add(p);
   return p;
 }
@@ -105,7 +127,7 @@ export async function getOrCreateSource(label, kind = 'other', ref = '') {
 export async function addUtterance(input) {
   const {
     termLabel, valence,
-    personName, personKind,
+    personName, personKind, personUrl = '', personProvider = 'manual',
     sourceLabel, sourceKind, sourceRef,
     contrastLabel, aspect = '', note = '', observedVia = 'direct',
     focus = 'performance', timestamp = '', locationNote = '',
@@ -114,7 +136,8 @@ export async function addUtterance(input) {
   if (!termLabel || !valence) throw new Error('termLabel と valence は必須');
 
   const term = await getOrCreateTerm(termLabel);
-  const person = personName ? await getOrCreatePerson(personName, personKind) : null;
+  const person = (personName || personUrl)
+    ? await getOrCreatePerson(personName, personKind, personUrl, personProvider) : null;
   const source = sourceLabel ? await getOrCreateSource(sourceLabel, sourceKind, sourceRef) : null;
   const contrast = contrastLabel ? await getOrCreateTerm(contrastLabel) : null;
 
@@ -240,17 +263,23 @@ export async function exportAll() {
 
 export async function importAll(data) {
   if (!data || (data.version !== 1 && data.version !== 2)) throw new Error('対応していないバックアップ形式');
-  // v1 バックアップは focus 等が無いので補完する（後方互換）。
+  // 旧バックアップは focus 等が無いので補完する（後方互換）。
   const utterances = (data.utterances || []).map((u) => ({
     ...u,
     focus: u.focus || 'performance',
     timestamp: u.timestamp || '',
     locationNote: u.locationNote || '',
   }));
+  // 旧Personは url / provider が無いので補完する。
+  const persons = (data.persons || []).map((p) => ({
+    ...p,
+    url: p.url || '',
+    provider: p.provider || 'manual',
+  }));
   await db.transaction('rw', db.terms, db.persons, db.sources, db.utterances, async () => {
     await Promise.all([db.terms.clear(), db.persons.clear(), db.sources.clear(), db.utterances.clear()]);
     await db.terms.bulkAdd(data.terms || []);
-    await db.persons.bulkAdd(data.persons || []);
+    await db.persons.bulkAdd(persons);
     await db.sources.bulkAdd(data.sources || []);
     await db.utterances.bulkAdd(utterances);
   });

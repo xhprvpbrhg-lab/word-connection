@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5050"],
       "port": 5050
+    },
+    {
+      "name": "nostore",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["devserver.py"],
+      "port": 5051
     }
   ]
 }

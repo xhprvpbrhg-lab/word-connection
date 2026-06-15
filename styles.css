@@ -166,6 +166,9 @@ body::before {
 .ctx-hint { font-size: 12px; color: var(--hint); margin: 14px 0 0; letter-spacing: 0.06em; }
 .meta-status { font-size: 12px; color: var(--muted); margin: 8px 2px 0; letter-spacing: 0.06em; }
 .meta-status.err { color: var(--sabi); }
+.chip-sub { color: var(--hint); font-size: 11px; margin-left: 6px; }
+.p-link { color: var(--ai); text-decoration: none; }
+.p-link:hover { text-decoration: underline; }
 
 /* 保存 */
 .save {

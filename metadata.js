@@ -45,6 +45,48 @@ const PROVIDERS = {
   youtube: fetchYouTube,
 };
 
+// --- X / Twitter（Person用） -------------------------------------------------
+
+// プロフィールでない予約パス。これらは username とみなさない。
+const X_RESERVED = new Set([
+  'home', 'explore', 'notifications', 'messages', 'search', 'settings', 'i',
+  'intent', 'share', 'hashtag', 'compose', 'login', 'logout', 'signup',
+  'about', 'tos', 'privacy', 'help', 'status',
+]);
+
+// X / Twitter URL から username を抽出。プロフィール・投稿どちらの形でも username を返す
+// （投稿URLは対象外だが、可能なら username 抽出してよい、という方針に沿う）。未対応は null。
+export function extractXUsername(url) {
+  const u = (url || '').trim();
+  const m = u.match(/^(?:https?:\/\/)?(?:www\.)?(?:x|twitter)\.com\/(@?[A-Za-z0-9_]{1,15})(?:[/?#]|$)/i);
+  if (!m) return null;
+  const name = m[1].replace(/^@/, '');
+  if (X_RESERVED.has(name.toLowerCase())) return null;
+  return name;
+}
+
+// Personメタデータ取得。返り値 { name, username, url, provider:'x' } もしくは null。
+// X oEmbed は本来ツイート用でプロフィールでは失敗しがち。失敗時は @username にフォールバック。
+export async function fetchPersonMetadata(url) {
+  try {
+    const username = extractXUsername(url);
+    if (!username) return null;
+    const profileUrl = `https://x.com/${username}`;
+    let name = `@${username}`;
+    try {
+      const endpoint = `https://publish.twitter.com/oembed?url=${encodeURIComponent(profileUrl)}&omit_script=1`;
+      const res = await fetch(endpoint);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.author_name) name = data.author_name; // 表示名が取れたら優先
+      }
+    } catch (e) { /* oEmbed失敗は @username のまま */ }
+    return { name, username, url: profileUrl, provider: 'x' };
+  } catch (e) {
+    return null;
+  }
+}
+
 // メイン入口。ネットワーク/CORS等の失敗はすべて null で吸収する。
 export async function fetchSourceMetadata(url) {
   try {

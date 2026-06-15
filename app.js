@@ -2,7 +2,7 @@ import { h, render } from 'https://esm.sh/preact@10';
 import { useState, useEffect, useCallback } from 'https://esm.sh/preact@10/hooks';
 import htm from 'https://esm.sh/htm@3';
 import * as repo from './db.js';
-import { fetchSourceMetadata, detectProvider } from './metadata.js';
+import { fetchSourceMetadata, detectProvider, fetchPersonMetadata, extractXUsername } from './metadata.js';
 
 const html = htm.bind(h);
 
@@ -84,6 +84,10 @@ function NoteInput({ onSaved }) {
   const [focus, setFocus] = useState('performance');
   const [person, setPerson] = useState('');
   const [personKind, setPersonKind] = useState('pianist');
+  const [personUrl, setPersonUrl] = useState('');
+  const [personProvider, setPersonProvider] = useState('manual');
+  const [personAuto, setPersonAuto] = useState(''); // 自動入力した名前（手入力と区別して置換判定）
+  const [personMetaStatus, setPersonMetaStatus] = useState(''); // '' | 'loading' | 'error'
   const [source, setSource] = useState('');
   const [sourceKind, setSourceKind] = useState('youtube');
   const [sourceRef, setSourceRef] = useState('');
@@ -147,6 +151,39 @@ function NoteInput({ onSaved }) {
     return () => { live = false; clearTimeout(timer); };
   }, [sourceRef, source]);
 
+  // Person URL欄に X プロフィールURLが入ったら、Person名が空のとき @username を仮入力し、
+  // 可能なら表示名に置換する。手入力があれば上書きしない。失敗は @username のまま。
+  useEffect(() => {
+    const url = personUrl.trim();
+    const username = extractXUsername(url);
+    if (!url || !username) { setPersonMetaStatus(''); return; }
+    setPersonProvider('x');
+    // 1) name が空なら即座に @username（手入力は尊重）
+    let auto = '';
+    if (!person.trim()) {
+      auto = `@${username}`;
+      setPerson(auto);
+      setPersonAuto(auto);
+    } else if (person === personAuto) {
+      auto = person; // すでに自動入力済み。置換対象。
+    } else {
+      return; // 手入力済み → 何もしない
+    }
+    let live = true;
+    setPersonMetaStatus('loading');
+    const timer = setTimeout(async () => {
+      const meta = await fetchPersonMetadata(url);
+      if (!live) return;
+      setPersonMetaStatus('');
+      if (meta && meta.name) {
+        // 取得中に手入力で変えられていなければ表示名へ置換
+        setPerson((prev) => (prev === auto || prev === `@${username}` ? meta.name : prev));
+        setPersonAuto((prev) => (prev === auto || prev === `@${username}` ? meta.name : prev));
+      }
+    }, 500);
+    return () => { live = false; clearTimeout(timer); };
+  }, [personUrl, person]);
+
   const onTerm = (v) => { setTerm(v); setFileUnder(null); };
   const onSource = (v) => {
     setSource(v);
@@ -154,7 +191,15 @@ function NoteInput({ onSaved }) {
     if (found) { setSourceKind(found.kind); setSourceRef(found.ref || ''); }
   };
   const pickSource = (s) => { setSource(s.label); setSourceKind(s.kind); setSourceRef(s.ref || ''); setShowSource(true); };
-  const pickPerson = (p) => { setPerson(p.name); setPersonKind(p.kind); setShowPerson(true); };
+  const pickPerson = (p) => {
+    setPerson(p.name); setPersonKind(p.kind);
+    setPersonUrl(p.url || ''); setPersonProvider(p.provider || 'manual'); setPersonAuto(''); setShowPerson(true);
+  };
+  // Person名を手入力したら、自動入力マーカーを解除（X URLが無ければ provider も manual に）
+  const onPersonName = (v) => {
+    setPerson(v);
+    if (v !== personAuto) { setPersonAuto(''); if (!extractXUsername(personUrl)) setPersonProvider('manual'); }
+  };
 
   const doSave = async (keepContext) => {
     const label = term.trim();
@@ -167,6 +212,7 @@ function NoteInput({ onSaved }) {
     await repo.addUtterance({
       termLabel, valence, focus,
       personName: person.trim() || null, personKind,
+      personUrl: personUrl.trim(), personProvider,
       sourceLabel: source.trim() || null, sourceKind, sourceRef: sourceRef.trim(),
       contrastLabel: contrast.trim() || null,
       note: note.trim(), observedVia: via,
@@ -262,7 +308,11 @@ function NoteInput({ onSaved }) {
       ${showPerson && html`
         <div class="reveal">
           <input class="line-in" list="persons" placeholder="自分 / ピアニスト名 / コメント主 …"
-            value=${person} onInput=${(e) => setPerson(e.target.value)} />
+            value=${person} onInput=${(e) => onPersonName(e.target.value)} />
+          <input class="line-in" placeholder="X プロフィールURL（任意）" value=${personUrl}
+            onInput=${(e) => setPersonUrl(e.target.value)} />
+          ${personMetaStatus === 'loading' && html`<div class="meta-status">表示名を取得中…</div>`}
+          ${personMetaStatus === 'error' && html`<div class="meta-status err">取得できませんでした</div>`}
           <div class="mini-row">
             <select value=${personKind} onChange=${(e) => setPersonKind(e.target.value)}>
               ${PERSON_KINDS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}
@@ -271,7 +321,10 @@ function NoteInput({ onSaved }) {
           ${recentPpl.length > 0 && html`
             <div class="suggests">
               <span class="sg-label">最近</span>
-              ${recentPpl.map((p) => html`<button class="chip" onClick=${() => pickPerson(p)}>${p.name}</button>`)}
+              ${recentPpl.map((p) => html`
+                <button class="chip" onClick=${() => pickPerson(p)} title=${p.url || ''}>
+                  ${p.name}${p.url ? html`<span class="chip-sub">@${p.url.replace(/\/+$/, '').split('/').pop()}</span>` : ''}
+                </button>`)}
             </div>`}
         </div>`}
 
@@ -412,7 +465,11 @@ function TermDetail({ termId }) {
               <span class="sc-focus">${focusLabel[u.focus || 'performance']}</span>
               ${u.timestamp ? html`<span>${u.timestamp}</span>` : ''}
               ${u.locationNote ? html`<span>${u.locationNote}</span>` : ''}
-              ${[u.source && u.source.label, u.person && u.person.name, originLabel[u.observedVia]].filter(Boolean).map((x) => html`<span>${x}</span>`)}
+              ${u.source && u.source.label ? html`<span>${u.source.label}</span>` : ''}
+              ${u.person && (u.person.url
+                ? html`<a class="p-link" href=${u.person.url} target="_blank" rel="noopener" onClick=${(e) => e.stopPropagation()}>${u.person.name}</a>`
+                : html`<span>${u.person.name}</span>`)}
+              <span>${originLabel[u.observedVia]}</span>
             </div>
             ${u.note ? html`<div class="sc-note">${u.note}</div>` : ''}
           </div>`)}

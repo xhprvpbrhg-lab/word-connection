@@ -44,7 +44,7 @@ python -m http.server 5050
 | `app.js` | 画面（Preact + htm、ビルド不要） |
 | `db.js` | データ層（Dexie/IndexedDB）。将来クラウド同期に差し替えやすいよう `repo` に分離 |
 | `styles.css` | スタイル（スマホ縦・ダークモード対応） |
-| `manifest.webmanifest` / `sw.js` / `icon.svg` | PWA（ホーム追加・オフライン） |
+| `manifest.webmanifest` / `sw.js` / `icon.png` | PWA（ホーム追加・オフライン） |
 
 ## データの居場所と注意
 - 保存先は**そのブラウザのIndexedDB**（端末内のみ）。ブラウザのデータ消去や機種変更で消える。

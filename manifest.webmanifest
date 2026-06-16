@@ -14,12 +14,6 @@
       "type": "image/png",
       "sizes": "1024x1024",
       "purpose": "any"
-    },
-    {
-      "src": "icon.svg",
-      "type": "image/svg+xml",
-      "sizes": "any",
-      "purpose": "any"
     }
   ]
 }

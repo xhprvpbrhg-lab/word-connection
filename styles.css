@@ -68,6 +68,30 @@ body::before {
 
 /* ====== 入力（ノート） ====== */
 .note { padding: 14px 0 8px; position: relative; }
+.note.editing { border-left: 2px solid var(--ai); padding-left: 16px; margin-left: -18px; }
+.edit-banner {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; color: var(--ai); letter-spacing: 0.1em; margin-bottom: 14px;
+}
+.edit-cancel {
+  font-size: 12px; color: var(--muted); background: transparent;
+  border: 0.5px solid var(--line2); border-radius: 999px; padding: 4px 12px; cursor: pointer;
+}
+
+/* 削除Undoトースト */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 16px; z-index: 50;
+  background: var(--sumi); color: var(--washi); font-size: 14px;
+  padding: 12px 18px; border-radius: 999px; box-shadow: 0 6px 24px rgba(0,0,0,0.22);
+  animation: toast-in 0.3s var(--ease);
+}
+.toast button {
+  font-size: 13px; color: var(--washi); background: transparent;
+  border: 0.5px solid rgba(247,244,237,0.4); border-radius: 999px; padding: 4px 12px; cursor: pointer;
+}
+.toast button:hover { background: rgba(247,244,237,0.12); }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .note.rippling::after {
   content: ''; position: absolute; left: 50%; bottom: 86px; width: 12px; height: 12px;
   border-radius: 50%; border: 1.5px solid var(--ai); transform: translate(-50%, 0);
@@ -197,7 +221,7 @@ body::before {
 /* 景色カード */
 .cards { display: flex; flex-direction: column; gap: 14px; }
 .scene-card {
-  display: block; text-decoration: none; color: inherit;
+  position: relative; display: block; text-decoration: none; color: inherit; cursor: pointer;
   background: var(--washi-card); border: 0.5px solid var(--line);
   border-radius: var(--radius); padding: 18px 20px;
   box-shadow: 0 1px 2px rgba(28, 28, 28, 0.04), 0 6px 18px rgba(28, 28, 28, 0.03);
@@ -205,7 +229,18 @@ body::before {
   transition: transform 0.3s var(--ease), box-shadow 0.3s var(--ease);
 }
 .scene-card:hover { transform: translateY(-2px); box-shadow: 0 2px 4px rgba(28,28,28,0.05), 0 10px 26px rgba(28,28,28,0.05); }
-.scene-card.flat { box-shadow: none; animation: none; }
+.scene-card.flat { box-shadow: none; animation: none; cursor: default; }
+.scene-card.flat:hover { transform: none; box-shadow: none; }
+
+/* カード右上の編集／削除（小さく静かに） */
+.card-actions { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; }
+.card-actions button {
+  display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+  color: var(--hint); background: transparent; border: none; border-radius: 50%; cursor: pointer;
+  opacity: 0.55; transition: opacity 0.25s var(--ease), color 0.25s var(--ease), background 0.25s var(--ease);
+}
+.card-actions button:hover { opacity: 1; color: var(--ai); background: rgba(28,28,28,0.04); }
+.sc-term, .sc-meta { padding-right: 56px; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 .sc-term { font-family: var(--serif); font-size: 21px; display: flex; align-items: center; gap: 10px; }

@@ -34,6 +34,19 @@ const originLabel = Object.fromEntries(ORIGINS);
 const TERM_PLACEHOLDERS = ['白い霧', '張りつめた', '湿度', '呼吸', '冷たい光', '古木', '遠い灯'];
 const pickPlaceholder = () => TERM_PLACEHOLDERS[Math.floor(Math.random() * TERM_PLACEHOLDERS.length)];
 
+// 小さく静かなアイコン
+const I_EDIT = html`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>`;
+const I_DEL = html`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>`;
+
+// 景色カード右上の編集／削除ボタン
+function CardActions({ id, onEdit, onDelete }) {
+  return html`
+    <div class="card-actions">
+      <button aria-label="編集" onClick=${(e) => { e.stopPropagation(); e.preventDefault(); onEdit(id); }}>${I_EDIT}</button>
+      <button aria-label="削除" onClick=${(e) => { e.stopPropagation(); e.preventDefault(); onDelete(id); }}>${I_DEL}</button>
+    </div>`;
+}
+
 // --- ルーティング（ハッシュ） ----------------------------------------------
 function useHashRoute() {
   const [hash, setHash] = useState(location.hash || '#/');
@@ -50,7 +63,38 @@ const go = (h) => { location.hash = h; };
 function App() {
   const hash = useHashRoute();
   const [tick, setTick] = useState(0);
+  const [editingId, setEditingId] = useState(null);
+  const [toast, setToast] = useState(null); // 削除Undo用の元レコード
   const refresh = useCallback(() => setTick((t) => t + 1), []);
+
+  const startEdit = useCallback((id) => {
+    setEditingId(id);
+    go('#/');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+  const finishEdit = useCallback(() => setEditingId(null), []);
+
+  const removeUtterance = useCallback(async (id) => {
+    if (!confirm('この景色を削除しますか？')) return;
+    const rec = await repo.deleteUtterance(id);
+    setEditingId((cur) => (cur === id ? null : cur));
+    refresh();
+    if (rec) setToast(rec);
+  }, [refresh]);
+
+  const undoDelete = useCallback(async () => {
+    setToast((rec) => {
+      if (rec) repo.restoreUtterance(rec).then(refresh);
+      return null;
+    });
+  }, [refresh]);
+
+  // トーストは5秒で自動的に消える（その時点で削除は確定）
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const m = hash.match(/^#\/term\/(.+)$/);
   return html`
@@ -63,20 +107,27 @@ function App() {
         <${BackupMenu} onChange=${refresh} />
       </header>
       ${m
-        ? html`<${TermDetail} termId=${decodeURIComponent(m[1])} key=${m[1] + tick} />`
-        : html`<${Home} tick=${tick} onSaved=${refresh} />`}
+        ? html`<${TermDetail} termId=${decodeURIComponent(m[1])} key=${m[1] + tick}
+            onEdit=${startEdit} onDelete=${removeUtterance} />`
+        : html`<${Home} tick=${tick} onSaved=${refresh}
+            editingId=${editingId} onEditDone=${finishEdit} onEdit=${startEdit} onDelete=${removeUtterance} />`}
+      ${toast && html`
+        <div class="toast">
+          <span>景色を削除しました</span>
+          <button onClick=${undoDelete}>元に戻す</button>
+        </div>`}
     </div>`;
 }
 
-function Home({ tick, onSaved }) {
+function Home({ tick, onSaved, editingId, onEditDone, onEdit, onDelete }) {
   return html`
-    <${NoteInput} onSaved=${onSaved} />
-    <${ObservationLog} tick=${tick} />
+    <${NoteInput} onSaved=${onSaved} editingId=${editingId} onEditDone=${onEditDone} />
+    <${ObservationLog} tick=${tick} onEdit=${onEdit} onDelete=${onDelete} />
     <${TermCloud} tick=${tick} />`;
 }
 
-// --- 入力（ノートに書き込む感覚） --------------------------------------------
-function NoteInput({ onSaved }) {
+// --- 入力（ノートに書き込む感覚。編集モードも兼ねる） ------------------------
+function NoteInput({ onSaved, editingId, onEditDone }) {
   const [term, setTerm] = useState('');
   const [valence, setValence] = useState('positive');
   const [suggest, setSuggest] = useState([]);
@@ -129,6 +180,47 @@ function NoteInput({ onSaved }) {
   }, [term]);
 
   useEffect(() => { if (focus === 'moment') setShowLocation(true); }, [focus]);
+
+  const resetForm = () => {
+    setTerm(''); setValence('positive'); setFileUnder(null); setSuggest([]);
+    setFocus('performance');
+    setPerson(''); setPersonKind('pianist'); setPersonUrl(''); setPersonProvider('manual'); setPersonAuto('');
+    setSource(''); setSourceKind('youtube'); setSourceRef(''); setVia('direct');
+    setContrast(''); setNote(''); setTimestamp(''); setLocationNote('');
+    setShowSource(false); setShowPerson(false); setShowContrast(false); setShowLocation(false);
+    setMetaStatus(''); setPersonMetaStatus('');
+  };
+
+  const prefill = (u) => {
+    setTerm(u.term ? u.term.label : '');
+    setValence(u.valence);
+    setFocus(u.focus || 'performance');
+    setPerson(u.person ? u.person.name : '');
+    setPersonKind(u.person ? u.person.kind : 'pianist');
+    setPersonUrl(u.person ? (u.person.url || '') : '');
+    setPersonProvider(u.person ? (u.person.provider || 'manual') : 'manual');
+    setSource(u.source ? u.source.label : '');
+    setSourceKind(u.source ? u.source.kind : 'youtube');
+    setSourceRef(u.source ? (u.source.ref || '') : '');
+    setVia(u.observedVia || 'direct');
+    setContrast(u.contrastTerm ? u.contrastTerm.label : '');
+    setNote(u.note || '');
+    setTimestamp(u.timestamp || '');
+    setLocationNote(u.locationNote || '');
+    setShowSource(!!u.source);
+    setShowPerson(!!u.person);
+    setShowContrast(!!u.contrastTerm);
+    setShowLocation(!!(u.timestamp || u.locationNote) || (u.focus === 'moment'));
+    setFileUnder(null); setSuggest([]); setPersonAuto(''); setMetaStatus(''); setPersonMetaStatus('');
+  };
+
+  // 編集対象が来たらフォームに流し込む。外れたら初期化。
+  useEffect(() => {
+    if (!editingId) { resetForm(); return undefined; }
+    let live = true;
+    repo.getUtteranceForEdit(editingId).then((u) => { if (live && u) prefill(u); });
+    return () => { live = false; };
+  }, [editingId]);
 
   // Source URL欄に対応URLが入ったら、Source名が空のときだけタイトルを自動取得（補助機能）。
   // 手入力があれば上書きしない。失敗しても保存は妨げない。
@@ -209,7 +301,7 @@ function NoteInput({ onSaved }) {
       if (label !== fileUnder.label) await repo.addAlias(fileUnder.id, label);
       termLabel = fileUnder.label;
     }
-    await repo.addUtterance({
+    const payload = {
       termLabel, valence, focus,
       personName: person.trim() || null, personKind,
       personUrl: personUrl.trim(), personProvider,
@@ -217,7 +309,19 @@ function NoteInput({ onSaved }) {
       contrastLabel: contrast.trim() || null,
       note: note.trim(), observedVia: via,
       timestamp, locationNote,
-    });
+    };
+
+    if (editingId) {
+      await repo.updateUtterance(editingId, payload);
+      reloadLists();
+      setRipple(true); setTimeout(() => setRipple(false), 500);
+      setSaved('updated'); setTimeout(() => setSaved(''), 1500);
+      onSaved && onSaved();
+      onEditDone && onEditDone(); // editingId が外れて resetForm が走る
+      return;
+    }
+
+    await repo.addUtterance(payload);
     reloadLists();
     setRipple(true); setTimeout(() => setRipple(false), 500);
     setTerm(''); setContrast(''); setNote(''); setShowContrast(false);
@@ -234,8 +338,13 @@ function NoteInput({ onSaved }) {
   const ctx = [source.trim(), person.trim()].filter(Boolean).join(' ・ ');
 
   return html`
-    <section class=${'note' + (ripple ? ' rippling' : '')}>
-      <div class="field-label">今日残った景色</div>
+    <section class=${'note' + (ripple ? ' rippling' : '') + (editingId ? ' editing' : '')}>
+      ${editingId && html`
+        <div class="edit-banner">
+          <span>景色を編集しています</span>
+          <button class="edit-cancel" onClick=${() => onEditDone && onEditDone()}>やめる</button>
+        </div>`}
+      <div class="field-label">${editingId ? 'この景色' : '今日残った景色'}</div>
       <input class="term-write" placeholder=${ph} value=${term}
         onInput=${(e) => onTerm(e.target.value)} />
 
@@ -339,10 +448,16 @@ function NoteInput({ onSaved }) {
 
       ${ctx && html`<div class="ctx-hint">${ctx}</div>`}
 
-      <button class=${'save' + (saved === 'done' ? ' ok' : '')} disabled=${!term.trim()}
-        onClick=${() => doSave(false)}>${saved === 'done' ? '残しました' : '景色を残す'}</button>
-      <button class=${'save-next' + (saved === 'next' ? ' ok' : '')} disabled=${!term.trim()}
-        onClick=${() => doSave(true)}>${saved === 'next' ? '次の景色へ…' : '次の景色へ'}</button>
+      ${editingId
+        ? html`
+          <button class=${'save' + (saved === 'updated' ? ' ok' : '')} disabled=${!term.trim()}
+            onClick=${() => doSave(false)}>${saved === 'updated' ? '更新しました' : '更新する'}</button>
+          <button class="save-next" onClick=${() => onEditDone && onEditDone()}>編集をやめる</button>`
+        : html`
+          <button class=${'save' + (saved === 'done' ? ' ok' : '')} disabled=${!term.trim()}
+            onClick=${() => doSave(false)}>${saved === 'done' ? '残しました' : '景色を残す'}</button>
+          <button class=${'save-next' + (saved === 'next' ? ' ok' : '')} disabled=${!term.trim()}
+            onClick=${() => doSave(true)}>${saved === 'next' ? '次の景色へ…' : '次の景色へ'}</button>`}
 
       <datalist id="persons">${persons.map((p) => html`<option value=${p.name} />`)}</datalist>
       <datalist id="sources">${sources.map((s) => html`<option value=${s.label} />`)}</datalist>
@@ -350,7 +465,7 @@ function NoteInput({ onSaved }) {
 }
 
 // --- 観察ログ（景色カード） --------------------------------------------------
-function ObservationLog({ tick }) {
+function ObservationLog({ tick, onEdit, onDelete }) {
   const [items, setItems] = useState([]);
   useEffect(() => { repo.recentUtterances(12).then(setItems); }, [tick]);
   if (!items.length) return null;
@@ -359,7 +474,8 @@ function ObservationLog({ tick }) {
       <div class="section-head">観察ログ</div>
       <div class="cards">
         ${items.map((u) => html`
-          <a class="scene-card" href=${'#/term/' + encodeURIComponent(u.termId)}>
+          <div class="scene-card" onClick=${() => go('#/term/' + encodeURIComponent(u.termId))}>
+            <${CardActions} id=${u.id} onEdit=${onEdit} onDelete=${onDelete} />
             <div class="sc-term">
               <span class=${'vdot ' + vCls[u.valence]}></span>
               ${u.term ? u.term.label : '—'}
@@ -372,7 +488,7 @@ function ObservationLog({ tick }) {
               ${u.locationNote ? html`<span>${u.locationNote}</span>` : ''}
             </div>
             ${u.note ? html`<div class="sc-note">${u.note}</div>` : ''}
-          </a>`)}
+          </div>`)}
       </div>
     </section>`;
 }
@@ -395,7 +511,7 @@ function TermCloud({ tick }) {
 }
 
 // --- 詳細（観察ノート） ------------------------------------------------------
-function TermDetail({ termId }) {
+function TermDetail({ termId, onEdit, onDelete }) {
   const [d, setD] = useState(null);
   useEffect(() => { repo.termDetail(termId).then(setD); }, [termId]);
   if (!d) return html`<div class="section">…</div>`;
@@ -460,6 +576,7 @@ function TermDetail({ termId }) {
       <div class="cards">
         ${d.utterances.map((u) => html`
           <div class="scene-card flat">
+            <${CardActions} id=${u.id} onEdit=${onEdit} onDelete=${onDelete} />
             <div class="sc-meta">
               <span class=${'vdot ' + vCls[u.valence]}></span>
               <span class="sc-focus">${focusLabel[u.focus || 'performance']}</span>

@@ -158,6 +158,65 @@ export async function addUtterance(input) {
   return u;
 }
 
+// 編集フォーム用に1件を解決して返す（term/person/source/contrast の表示名・URL付き）
+export async function getUtteranceForEdit(id) {
+  const u = await db.utterances.get(id);
+  if (!u) return null;
+  const [hy] = await hydrate([u]);
+  return hy;
+}
+
+// Utteranceの更新。term/person/source/contrast を解決し直して付け替える。
+// term を変えれば termId が変わり、集計・共起はクエリ側でライブ再計算される。
+export async function updateUtterance(id, input) {
+  const existing = await db.utterances.get(id);
+  if (!existing) throw new Error('対象の発話が見つかりません');
+  const {
+    termLabel, valence,
+    personName, personKind, personUrl = '', personProvider = 'manual',
+    sourceLabel, sourceKind, sourceRef,
+    contrastLabel, note = '', observedVia = 'direct',
+    focus = 'performance', timestamp = '', locationNote = '',
+  } = input;
+  if (!termLabel || !valence) throw new Error('termLabel と valence は必須');
+
+  const term = await getOrCreateTerm(termLabel);
+  const person = (personName || personUrl)
+    ? await getOrCreatePerson(personName, personKind, personUrl, personProvider) : null;
+  const source = sourceLabel ? await getOrCreateSource(sourceLabel, sourceKind, sourceRef) : null;
+  const contrast = contrastLabel ? await getOrCreateTerm(contrastLabel) : null;
+
+  const patch = {
+    termId: term.id,
+    valence,
+    personId: person ? person.id : null,
+    sourceId: source ? source.id : null,
+    contrastTermId: contrast ? contrast.id : null,
+    focus: FOCUS_KEYS.includes(focus) ? focus : 'performance',
+    timestamp: (timestamp || '').trim(),
+    locationNote: (locationNote || '').trim(),
+    note,
+    observedVia,
+  };
+  await db.utterances.update(id, patch); // aspect 等の既存フィールドは温存
+  return { ...existing, ...patch };
+}
+
+// 削除（hard）。元レコードを返す（Undo用）。
+// 将来 soft delete にするなら、ここで { ...rec, deletedAt } を別管理にするだけでよい。
+export async function deleteUtterance(id) {
+  const rec = await db.utterances.get(id);
+  if (!rec) return null;
+  await db.utterances.delete(id);
+  return rec;
+}
+
+// Undo: 同じレコード（id込み）を復元する。
+export async function restoreUtterance(rec) {
+  if (!rec || !rec.id) return;
+  await db.utterances.put(rec);
+}
+
 export async function recentUtterances(limit = 10) {
   const us = await db.utterances.orderBy('createdAt').reverse().limit(limit).toArray();
   return hydrate(us);
